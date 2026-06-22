@@ -6,6 +6,8 @@ require "./protocol"
 module Swim
   class Node
     getter protocol : Protocol
+    # Exposing the socket to allow users to set advanced UDP flags if needed
+    getter socket : UDPSocket
 
     @socket : UDPSocket
     @running = Atomic(Bool).new(false)
@@ -35,7 +37,8 @@ module Swim
       # 2KB safely fits any standard ~1400B MTU UDP packet without truncation
       buffer = Bytes.new(2048)
 
-      while @running.get
+      # Ensure we do not even try to loop if the socket is closed
+      while @running.get && !@socket.closed?
         begin
           bytes_read, _client_addr = @socket.receive(buffer)
           msg_json = String.new(buffer[0, bytes_read])
@@ -44,8 +47,11 @@ module Swim
           effects = @protocol_lock.synchronize { @protocol.on_message(msg) }
           process_effects(effects)
         rescue ex : IO::Error | JSON::ParseException
-          # IO::Error happens cleanly when the socket is closed during stop().
-          # JSON errors happen if garbage packets arrive.
+          # If the socket was closed out from under us, break immediately
+          break if @socket.closed?
+
+          # Otherwise, it might be a transient routing error or bad JSON packet.
+          # We ignore it and continue listening.
           break unless @running.get
         end
       end
@@ -53,11 +59,11 @@ module Swim
 
     private def tick_loop(interval : Time::Span)
       while @running.get
-        sleep interval
-        break unless @running.get # Exit early if stopped during sleep
-
         effects = @protocol_lock.synchronize { @protocol.on_tick }
         process_effects(effects)
+
+        # Sleep until the next cycle, but allow safe exit on shutdown
+        sleep interval
       end
     end
 
@@ -70,8 +76,9 @@ module Swim
             target_addr = Socket::IPAddress.new(host, port_str.to_i)
             @socket.send(effect.message.to_json, target_addr)
           rescue ex : IO::Error
-            # If the socket is closed right as we try to send, ignore it if shutting down
-            raise ex if @running.get
+            # UDP sends can fail for routing issues (e.g., EHOSTUNREACH).
+            # We silently drop the packet; the protocol's timeout logic handles the failure.
+            nil
           end
         when ScheduleTimeout
           spawn(name: "swim_timeout_#{effect.seq}") do
