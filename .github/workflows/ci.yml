@@ -1,0 +1,87 @@
+name: Crystal CI
+
+on:
+  pull_request:
+    branches: [ master ]
+  push:
+    branches: [ master ]
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        crystal: [latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: ${{ matrix.crystal }}
+
+      - name: Cache Shards
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/shards
+          key: ${{ runner.os }}-crystal-${{ matrix.crystal }}-shards-${{ hashFiles('shard.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-crystal-${{ matrix.crystal }}-shards-
+
+      - run: shards install
+      - run: crystal tool format --check
+
+      - name: Run specs (Single-Threaded)
+        run: crystal spec --error-trace --verbose
+
+      - name: Run specs (Multi-Threaded)
+        run: crystal spec -Dpreview_mt -Dexecution_context --error-trace --verbose
+
+  coverage:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: crystal-lang/install-crystal@v1
+        with:
+          crystal: latest
+
+      - name: Install kcov
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y kcov
+
+      - name: Cache Shards
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/shards
+          key: ubuntu-22.04-crystal-latest-shards-${{ hashFiles('shard.yml') }}
+
+      - run: shards install
+
+      - name: Build specs binary
+        run: |
+          echo 'require "./spec/**"' > all_specs.cr
+          mkdir -p bin coverage
+          crystal build all_specs.cr -o bin/all_specs --debug
+
+      - name: Run kcov
+        run: kcov --clean --include-path=$(pwd)/src ./coverage ./bin/all_specs
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: alumna/crystal-swim
+          files: ./coverage/**/cobertura.xml,./coverage/**/cov.xml
+          flags: unittests
+          fail_ci_if_error: false

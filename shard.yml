@@ -1,0 +1,9 @@
+name: swim
+version: 0.1.0
+
+authors:
+  - Paulo Coghi <paulo@adimira.com>
+
+crystal: ">= 1.20.0"
+
+license: MIT
