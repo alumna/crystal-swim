@@ -50,11 +50,9 @@ module Swim
           process_effects(effects)
         rescue JSON::ParseException
           # Bad network packet - silently drop and continue
-          next
         rescue IO::Error
-          # Socket closed or unroutable
-          break if @socket.closed?
-          break unless @running.get
+          # Transient UDP error (e.g., ICMP port unreachable) or a closed socket during shutdown.
+          # We do nothing here; the while loop condition natively handles clean exits.
         end
       end
     end
