@@ -14,15 +14,11 @@ module Swim
       @lock.write do
         existing = @members[new_member.id]?
 
-        if existing
-          if new_member.overrides?(existing)
-            @members[new_member.id] = new_member
-            return true
-          end
-          return false
-        else
+        if !existing || new_member.overrides?(existing)
           @members[new_member.id] = new_member
-          return true
+          true
+        else
+          false
         end
       end
     end
@@ -45,9 +41,11 @@ module Swim
     # Selects random members.
     # exclude_dead: true prevents us from wasting network bandwidth pinging tombstones.
     def sample(count : Int32, exclude_ids : Enumerable(String) = [] of String, exclude_dead : Bool = false) : Array(Member)
+      exclude_set = exclude_ids.to_set
+
       @lock.read do
         candidates = @members.values.reject do |m|
-          exclude_ids.includes?(m.id) || (exclude_dead && m.state == State::Dead)
+          exclude_set.includes?(m.id) || (exclude_dead && m.state.dead?)
         end
         candidates.sample(count)
       end

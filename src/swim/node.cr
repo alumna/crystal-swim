@@ -15,6 +15,10 @@ module Swim
     # Protects the purely functional Protocol from concurrent fiber access
     @protocol_lock = Sync::Mutex.new
 
+    # IP Parsing cache for performance
+    @addr_cache = Hash(String, Socket::IPAddress).new
+    @addr_cache_lock = Sync::Mutex.new
+
     def initialize(@protocol : Protocol, @host : String, @port : Int32)
       @socket = UDPSocket.new
       @socket.bind(@host, @port)
@@ -34,10 +38,8 @@ module Swim
     end
 
     private def listen_loop
-      # 2KB safely fits any standard ~1400B MTU UDP packet without truncation
       buffer = Bytes.new(2048)
 
-      # Ensure we do not even try to loop if the socket is closed
       while @running.get && !@socket.closed?
         begin
           bytes_read, _client_addr = @socket.receive(buffer)
@@ -46,12 +48,12 @@ module Swim
 
           effects = @protocol_lock.synchronize { @protocol.on_message(msg) }
           process_effects(effects)
-        rescue ex : IO::Error | JSON::ParseException
-          # If the socket was closed out from under us, break immediately
+        rescue JSON::ParseException
+          # Bad network packet - silently drop and continue
+          next
+        rescue IO::Error
+          # Socket closed or unroutable
           break if @socket.closed?
-
-          # Otherwise, it might be a transient routing error or bad JSON packet.
-          # We ignore it and continue listening.
           break unless @running.get
         end
       end
@@ -72,12 +74,10 @@ module Swim
         case effect
         when SendMessage
           begin
-            host, port_str = effect.address.split(":", 2)
-            target_addr = Socket::IPAddress.new(host, port_str.to_i)
+            target_addr = get_target_address(effect.address)
             @socket.send(effect.message.to_json, target_addr)
           rescue ex : IO::Error
-            # UDP sends can fail for routing issues (e.g., EHOSTUNREACH).
-            # We silently drop the packet; the protocol's timeout logic handles the failure.
+            # Silently drop unroutable packets; protocol logic handles it
             nil
           end
         when ScheduleTimeout
@@ -91,6 +91,15 @@ module Swim
               process_effects(timeout_effects)
             end
           end
+        end
+      end
+    end
+
+    private def get_target_address(addr_str : String) : Socket::IPAddress
+      @addr_cache_lock.synchronize do
+        @addr_cache[addr_str] ||= begin
+          host, port = addr_str.split(":", 2)
+          Socket::IPAddress.new(host, port.to_i)
         end
       end
     end
