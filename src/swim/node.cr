@@ -1,27 +1,32 @@
 require "socket"
 require "json"
 require "sync"
+require "digest/sha256"
 require "./protocol"
 
 module Swim
   class Node
     getter protocol : Protocol
-    # Exposing the socket to allow users to set advanced UDP flags if needed
     getter socket : UDPSocket
 
     @socket : UDPSocket
     @running = Atomic(Bool).new(false)
-
-    # Protects the purely functional Protocol from concurrent fiber access
     @protocol_lock = Sync::Mutex.new
 
-    # IP Parsing cache for performance
     @addr_cache = Hash(String, Socket::IPAddress).new
     @addr_cache_lock = Sync::Mutex.new
 
-    def initialize(@protocol : Protocol, @host : String, @port : Int32)
+    # Store the processed 32-byte symmetric key, if provided
+    @encryption_key : Bytes?
+
+    def initialize(@protocol : Protocol, @host : String, @port : Int32, encryption_key : String? = nil)
       @socket = UDPSocket.new
       @socket.bind(@host, @port)
+
+      if key = encryption_key
+        # Hash any length string into exactly 32 bytes for AES-256
+        @encryption_key = Digest::SHA256.digest(key).to_slice
+      end
     end
 
     # Starts the background engine.
@@ -43,16 +48,25 @@ module Swim
       while @running.get && !@socket.closed?
         begin
           bytes_read, _client_addr = @socket.receive(buffer)
-          msg_json = String.new(buffer[0, bytes_read])
+          packet = buffer[0, bytes_read]
+
+          # Decrypt if a key is configured, otherwise read raw JSON
+          msg_json = if key = @encryption_key
+                       Cipher.decrypt(packet, key)
+                     else
+                       String.new(packet)
+                     end
+
           msg = Message.from_json(msg_json)
 
           effects = @protocol_lock.synchronize { @protocol.on_message(msg) }
           process_effects(effects)
+        rescue OpenSSL::Cipher::Error
+          # Invalid cluster key or tampered packet - drop
         rescue JSON::ParseException
           # Bad network packet - silently drop and continue
         rescue IO::Error
-          # Transient UDP error (e.g., ICMP port unreachable) or a closed socket during shutdown.
-          # We do nothing here; the while loop condition natively handles clean exits.
+          # Transient UDP error or socket closed on shutdown.
         end
       end
     end
@@ -73,9 +87,17 @@ module Swim
         when SendMessage
           begin
             target_addr = get_target_address(effect.address)
-            @socket.send(effect.message.to_json, target_addr)
+            plaintext = effect.message.to_json
+
+            # Encrypt if a key is configured, otherwise send raw JSON
+            payload = if key = @encryption_key
+                        Cipher.encrypt(plaintext, key)
+                      else
+                        plaintext.to_slice
+                      end
+
+            @socket.send(payload, target_addr)
           rescue ex : IO::Error
-            # Silently drop unroutable packets; protocol logic handles it
             nil
           end
         when ScheduleTimeout

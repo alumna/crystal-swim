@@ -1,3 +1,4 @@
+require "./swim/cipher"
 require "./swim/effect"
 require "./swim/member"
 require "./swim/membership_list"
