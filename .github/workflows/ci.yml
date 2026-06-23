@@ -1,3 +1,4 @@
+# Github Actions test and coverage workflow
 name: Crystal CI
 
 on:

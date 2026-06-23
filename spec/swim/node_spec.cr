@@ -43,4 +43,70 @@ describe Swim::Node do
       node_b.stop
     end
   end
+
+  it "processes timeouts successfully while running" do
+    member_a = Swim::Member.new("A", "127.0.0.1:5003", 1_u64, Swim::State::Alive)
+    member_b = Swim::Member.new("B", "127.0.0.1:5004", 1_u64, Swim::State::Alive)
+
+    list = Swim::MembershipList.new
+    list.update(member_b) # A knows about B
+
+    protocol = Swim::Protocol.new(member_a, list)
+    node = Swim::Node.new(protocol, "127.0.0.1", 5003)
+
+    # Start ticking. It will immediately send a ping and schedule a 500ms Direct timeout.
+    # When that fails, it schedules another 500ms Indirect timeout.
+    node.start(tick_interval: 1.second)
+
+    # Wait 1.1 seconds to comfortably exceed the combined 1000ms protocol timeouts
+    sleep 1.1.seconds
+
+    # Assert that the full failure detection sequence completed and marked B as suspect
+    node.protocol.members.get("B").try(&.state).should eq(Swim::State::Suspect)
+
+    node.stop
+  end
+
+  it "safely swallows UDP socket errors on send" do
+    member = Swim::Member.new("A", "127.0.0.1:5005", 1_u64, Swim::State::Alive)
+    list = Swim::MembershipList.new
+    list.update(Swim::Member.new("B", "127.0.0.1:5006", 1_u64, Swim::State::Alive))
+
+    protocol = Swim::Protocol.new(member, list)
+    node = Swim::Node.new(protocol, "127.0.0.1", 5005)
+
+    # Deliberately close the socket *before* sending to trigger IO::Error
+    node.socket.close
+
+    node.start(tick_interval: 10.milliseconds)
+
+    # Let the ticker attempt to send on a closed socket. It should gracefully rescue `nil`.
+    sleep 50.milliseconds
+
+    node.stop
+  end
+
+  it "ignores malformed JSON packets without crashing" do
+    member = Swim::Member.new("A", "127.0.0.1:5007", 1_u64, Swim::State::Alive)
+    list = Swim::MembershipList.new
+
+    protocol = Swim::Protocol.new(member, list)
+    node = Swim::Node.new(protocol, "127.0.0.1", 5007)
+
+    node.start(tick_interval: 1.second)
+
+    # Manually send garbage UDP data to the node's listening port
+    garbage_socket = UDPSocket.new
+    target_addr = Socket::IPAddress.new("127.0.0.1", 5007)
+    garbage_socket.send("{ bad json packet... ", target_addr)
+    garbage_socket.close
+
+    # Give the background listen_loop time to receive and fail parsing
+    sleep 50.milliseconds
+
+    # The node should have rescued the JSON error and still be fully operational
+    node.protocol.members.size.should eq(1) # Still just knows about itself
+
+    node.stop
+  end
 end
