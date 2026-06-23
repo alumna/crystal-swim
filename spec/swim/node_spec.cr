@@ -85,4 +85,28 @@ describe Swim::Node do
 
     node.stop
   end
+
+  it "ignores malformed JSON packets without crashing" do
+    member = Swim::Member.new("A", "127.0.0.1:5007", 1_u64, Swim::State::Alive)
+    list = Swim::MembershipList.new
+
+    protocol = Swim::Protocol.new(member, list)
+    node = Swim::Node.new(protocol, "127.0.0.1", 5007)
+
+    node.start(tick_interval: 1.second)
+
+    # Manually send garbage UDP data to the node's listening port
+    garbage_socket = UDPSocket.new
+    target_addr = Socket::IPAddress.new("127.0.0.1", 5007)
+    garbage_socket.send("{ bad json packet... ", target_addr)
+    garbage_socket.close
+
+    # Give the background listen_loop time to receive and fail parsing
+    sleep 50.milliseconds
+
+    # The node should have rescued the JSON error and still be fully operational
+    node.protocol.members.size.should eq(1) # Still just knows about itself
+
+    node.stop
+  end
 end
