@@ -12,7 +12,7 @@ This shard is designed to answer one question deterministically and efficiently:
 * **Hexagonal Architecture (Sans-I/O):** The core protocol is a pure state machine decoupled from time and sockets, allowing for instantaneous, deterministic network partition testing.
 * **Lifeguard Extensions Included:** Natively implements Suspicion Refutation and Local Health Awareness (LHA) to dynamically scale timeouts and prevent false-positive cascading failures in degraded networks.
 * **Thread-Safe:** Safe to read from and write to concurrently, natively supporting Crystal 1.20+ Execution Contexts (`preview_mt`).
-* **Piggybacked Gossip:** Cluster state is disseminated exponentially fast with zero extra packets via MTU-bounded piggybacking.
+* **Randomized Piggybacked Gossip:** Cluster state is disseminated exponentially fast with zero extra packets via MTU-bounded randomized piggybacking, guaranteeing multi-hop convergence.
 * **Zero Dependencies:** Pure Crystal implementation based entirely on Crystal's stdlib.
 
 ## Installation
@@ -32,11 +32,11 @@ This shard is designed to answer one question deterministically and efficiently:
 ```crystal
 require "swim"
 
-# 1. Define the local member
+# 1. Define the local member (Use a timestamp for the incarnation number in production)
 local_member = Swim::Member.new(
   id: "node-1",
   address: "10.0.0.1:5000",
-  incarnation: 1_u64,
+  incarnation: Time.utc.to_unix.to_u64,
   state: Swim::State::Alive
 )
 
@@ -45,7 +45,7 @@ members = Swim::MembershipList.new
 protocol = Swim::Protocol.new(local_member, members)
 
 # (Optional) Seed the node with a known peer to join the cluster
-seed_node = Swim::Member.new("node-2", "10.0.0.2:5000", 1_u64, Swim::State::Alive)
+seed_node = Swim::Member.new("node-2", "10.0.0.2:5000", 0_u64, Swim::State::Alive)
 members.update(seed_node)
 
 # 3. Start the background network engine
