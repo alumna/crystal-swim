@@ -43,7 +43,8 @@ module Swim
     end
 
     private def listen_loop
-      buffer = Bytes.new(2048)
+      # 65507 is the absolute maximum payload size for a UDP packet.
+      buffer = Bytes.new(65507)
 
       while @running.get && !@socket.closed?
         begin
@@ -83,8 +84,9 @@ module Swim
 
     private def process_effects(effects : Array(Effect))
       effects.each do |effect|
+        # Exhaustive matching: Compiler errors if an Effect is added and not handled
         case effect
-        when SendMessage
+        in SendMessage
           begin
             target_addr = get_target_address(effect.address)
             plaintext = effect.message.to_json
@@ -97,10 +99,10 @@ module Swim
                       end
 
             @socket.send(payload, target_addr)
-          rescue ex : IO::Error
+          rescue IO::Error
             nil
           end
-        when ScheduleTimeout
+        in ScheduleTimeout
           spawn(name: "swim_timeout_#{effect.seq}") do
             sleep effect.duration
 
@@ -118,7 +120,8 @@ module Swim
     private def get_target_address(addr_str : String) : Socket::IPAddress
       @addr_cache_lock.synchronize do
         @addr_cache[addr_str] ||= begin
-          host, port = addr_str.split(":", 2)
+          # rpartition returns a Tuple, avoiding the Array allocation of .split
+          host, _, port = addr_str.rpartition(':')
           Socket::IPAddress.new(host, port.to_i)
         end
       end
