@@ -20,9 +20,14 @@ module Swim
     # Lifeguard: Local Health Awareness
     getter local_health_multiplier : Int32 = 0
     @max_local_health_multiplier : Int32 = 5
-    @base_timeout : Time::Span = 500.milliseconds
+    @base_timeout : Time::Span
 
-    def initialize(@local_member : Member, @members : MembershipList, @ping_req_group_size : Int32 = 3)
+    def initialize(
+      @local_member : Member,
+      @members : MembershipList,
+      @ping_req_group_size : Int32 = 3,
+      @base_timeout : Time::Span = 500.milliseconds,
+    )
       @members.update(@local_member)
     end
 
