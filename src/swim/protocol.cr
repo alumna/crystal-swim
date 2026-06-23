@@ -150,10 +150,20 @@ module Swim
     # Tries to apply the member to the list. If it's a genuine update (newer incarnation or worse state),
     # it adds it to the gossip queue so we spread the news.
     private def apply_update(member : Member) : Nil
-      # Never accept state updates about ourselves from others that claim we are Dead/Suspect.
-      # (In a fully extended SWIM implementation with Lifeguard, we would actually increment
-      # our own incarnation number here and refute it, but we ignore it for now).
-      return if member.id == @local_member.id && member.state != State::Alive
+      # Lifeguard: Suspicion Refutation
+      if member.id == @local_member.id
+        # If someone suspects us, we refute it by incrementing our incarnation and gossiping our survival.
+        if member.state == State::Suspect
+          new_incarnation = @local_member.incarnation + 1_u64
+          @local_member = @local_member.copy_with(incarnation: new_incarnation, state: State::Alive)
+
+          # Update our own local list and queue the rebuttal to be broadcasted
+          @members.update(@local_member)
+          @gossip_queue << @local_member
+        end
+        # We ignore all other gossip about ourselves (e.g., claiming we are Dead is fatal, or Alive is redundant)
+        return
+      end
 
       if @members.update(member)
         @gossip_queue << member
