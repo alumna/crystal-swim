@@ -26,8 +26,6 @@ end
 
 module Swim
   module Cipher
-    # AES-256-GCM requires a 32-byte key.
-    # We prefix the packet with the 12-byte IV and 16-byte Auth Tag.
     def self.encrypt(plaintext : String, key : Bytes) : Bytes
       cipher = OpenSSL::Cipher.new("aes-256-gcm")
       cipher.encrypt
@@ -36,14 +34,23 @@ module Swim
       iv = Random::Secure.random_bytes(12)
       cipher.iv = iv
 
-      ciphertext = cipher.update(plaintext)
-      ciphertext += cipher.final
+      ciphertext_update = cipher.update(plaintext)
+      ciphertext_final = cipher.final
+      tag = cipher.gcm_tag
 
-      io = IO::Memory.new(12 + 16 + ciphertext.bytesize)
-      io.write(iv)
-      io.write(cipher.gcm_tag)
-      io.write(ciphertext)
-      io.to_slice
+      # Direct byte copying to avoid IO::Memory and intermediate Bytes allocations
+      out_size = 28 + ciphertext_update.bytesize + ciphertext_final.bytesize
+      out = Bytes.new(out_size)
+
+      out[0, 12].copy_from(iv)
+      out[12, 16].copy_from(tag)
+      out[28, ciphertext_update.bytesize].copy_from(ciphertext_update)
+
+      if ciphertext_final.bytesize > 0
+        out[28 + ciphertext_update.bytesize, ciphertext_final.bytesize].copy_from(ciphertext_final)
+      end
+
+      out
     end
 
     def self.decrypt(payload : Bytes, key : Bytes) : String
@@ -59,9 +66,11 @@ module Swim
       cipher.iv = iv
       cipher.gcm_tag = tag
 
-      plaintext = cipher.update(ciphertext)
-      plaintext += cipher.final
-      String.new(plaintext)
+      # Using String.build prevents intermediate Bytes#+ allocation
+      String.build do |str|
+        str.write(cipher.update(ciphertext))
+        str.write(cipher.final)
+      end
     end
   end
 end

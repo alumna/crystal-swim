@@ -143,15 +143,15 @@ describe Swim::Node do
   end
 
   it "ignores packets encrypted with the wrong key" do
-    member = Swim::Member.new("A", "127.0.0.1:5010", 1_u64, Swim::State::Alive)
+    member = Swim::Member.new("A", "127.0.0.1:5099", 1_u64, Swim::State::Alive)
     protocol = Swim::Protocol.new(member, Swim::MembershipList.new)
 
-    node = Swim::Node.new(protocol, "127.0.0.1", 5010, encryption_key: "correct-key")
+    node = Swim::Node.new(protocol, "127.0.0.1", 5099, encryption_key: "correct-key")
     node.start(tick_interval: 1.second)
 
     # Simulate an attacker or misconfigured node sending garbage/wrong key
     garbage_socket = UDPSocket.new
-    target_addr = Socket::IPAddress.new("127.0.0.1", 5010)
+    target_addr = Socket::IPAddress.new("127.0.0.1", 5099)
     garbage_socket.send("unencrypted plaintext json", target_addr)
     garbage_socket.close
 
