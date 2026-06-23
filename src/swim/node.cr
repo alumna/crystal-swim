@@ -1,23 +1,32 @@
 require "socket"
 require "json"
 require "sync"
+require "digest/sha256"
 require "./protocol"
 
 module Swim
   class Node
     getter protocol : Protocol
-    # Exposing the socket to allow users to set advanced UDP flags if needed
     getter socket : UDPSocket
 
     @socket : UDPSocket
     @running = Atomic(Bool).new(false)
-
-    # Protects the purely functional Protocol from concurrent fiber access
     @protocol_lock = Sync::Mutex.new
 
-    def initialize(@protocol : Protocol, @host : String, @port : Int32)
+    @addr_cache = Hash(String, Socket::IPAddress).new
+    @addr_cache_lock = Sync::Mutex.new
+
+    # Store the processed 32-byte symmetric key, if provided
+    @encryption_key : Bytes?
+
+    def initialize(@protocol : Protocol, @host : String, @port : Int32, encryption_key : String? = nil)
       @socket = UDPSocket.new
       @socket.bind(@host, @port)
+
+      if key = encryption_key
+        # Hash any length string into exactly 32 bytes for AES-256
+        @encryption_key = Digest::SHA256.digest(key).to_slice
+      end
     end
 
     # Starts the background engine.
@@ -34,25 +43,30 @@ module Swim
     end
 
     private def listen_loop
-      # 2KB safely fits any standard ~1400B MTU UDP packet without truncation
       buffer = Bytes.new(2048)
 
-      # Ensure we do not even try to loop if the socket is closed
       while @running.get && !@socket.closed?
         begin
           bytes_read, _client_addr = @socket.receive(buffer)
-          msg_json = String.new(buffer[0, bytes_read])
+          packet = buffer[0, bytes_read]
+
+          # Decrypt if a key is configured, otherwise read raw JSON
+          msg_json = if key = @encryption_key
+                       Cipher.decrypt(packet, key)
+                     else
+                       String.new(packet)
+                     end
+
           msg = Message.from_json(msg_json)
 
           effects = @protocol_lock.synchronize { @protocol.on_message(msg) }
           process_effects(effects)
-        rescue ex : IO::Error | JSON::ParseException
-          # If the socket was closed out from under us, break immediately
-          break if @socket.closed?
-
-          # Otherwise, it might be a transient routing error or bad JSON packet.
-          # We ignore it and continue listening.
-          break unless @running.get
+        rescue OpenSSL::Cipher::Error
+          # Invalid cluster key or tampered packet - drop
+        rescue JSON::ParseException
+          # Bad network packet - silently drop and continue
+        rescue IO::Error
+          # Transient UDP error or socket closed on shutdown.
         end
       end
     end
@@ -72,12 +86,18 @@ module Swim
         case effect
         when SendMessage
           begin
-            host, port_str = effect.address.split(":", 2)
-            target_addr = Socket::IPAddress.new(host, port_str.to_i)
-            @socket.send(effect.message.to_json, target_addr)
+            target_addr = get_target_address(effect.address)
+            plaintext = effect.message.to_json
+
+            # Encrypt if a key is configured, otherwise send raw JSON
+            payload = if key = @encryption_key
+                        Cipher.encrypt(plaintext, key)
+                      else
+                        plaintext.to_slice
+                      end
+
+            @socket.send(payload, target_addr)
           rescue ex : IO::Error
-            # UDP sends can fail for routing issues (e.g., EHOSTUNREACH).
-            # We silently drop the packet; the protocol's timeout logic handles the failure.
             nil
           end
         when ScheduleTimeout
@@ -91,6 +111,15 @@ module Swim
               process_effects(timeout_effects)
             end
           end
+        end
+      end
+    end
+
+    private def get_target_address(addr_str : String) : Socket::IPAddress
+      @addr_cache_lock.synchronize do
+        @addr_cache[addr_str] ||= begin
+          host, port = addr_str.split(":", 2)
+          Socket::IPAddress.new(host, port.to_i)
         end
       end
     end

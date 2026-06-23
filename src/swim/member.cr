@@ -17,12 +17,7 @@ module Swim
     # Determines if this member's state should overwrite an existing member's state,
     # following standard SWIM conflict resolution rules.
     def overrides?(other : Member) : Bool
-      # 1. Higher incarnation always wins
-      return true if self.incarnation > other.incarnation
-      return false if self.incarnation < other.incarnation
-
-      # 2. If incarnations are equal, state precedence applies: Dead > Suspect > Alive
-      self.state.value > other.state.value
+      {self.incarnation, self.state.value} > {other.incarnation, other.state.value}
     end
   end
 end

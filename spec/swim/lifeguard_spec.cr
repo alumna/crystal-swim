@@ -26,6 +26,19 @@ describe "Lifeguard Extensions" do
       rebuttal_gossip.try(&.id).should eq("B")
       rebuttal_gossip.try(&.state).should eq(Swim::State::Alive)
     end
+
+    it "increments incarnation and refutes when a node receives gossip that it is DEAD" do
+      local_b = Swim::Member.new("B", "10.0.0.2", 1_u64, Swim::State::Alive)
+      protocol_b = Swim::Protocol.new(local_b, Swim::MembershipList.new)
+
+      dead_b = local_b.copy_with(state: Swim::State::Dead)
+      msg = Swim::Message.new(Swim::MessageType::Ping, 1_u64, "A", "10.0.0.1", changes: [dead_b])
+
+      protocol_b.on_message(msg)
+
+      protocol_b.local_member.incarnation.should eq(2_u64)
+      protocol_b.local_member.state.should eq(Swim::State::Alive)
+    end
   end
 
   describe "Local Health Awareness" do

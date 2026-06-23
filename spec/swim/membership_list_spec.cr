@@ -95,4 +95,33 @@ describe Swim::MembershipList do
       sampled.size.should eq(1)
     end
   end
+
+  describe "Tombstone GC" do
+    it "removes dead members that exceed the TTL" do
+      list = Swim::MembershipList.new
+      list.update(Swim::Member.new("1", "10.0.0.1", 1_u64, Swim::State::Dead))
+
+      # A TTL of 0 seconds guarantees it is immediately eligible for GC
+      list.cleanup_tombstones(0.seconds)
+
+      list.size.should eq(0)
+    end
+
+    it "does not remove alive or suspect members" do
+      list = Swim::MembershipList.new
+      list.update(Swim::Member.new("1", "10.0.0.1", 1_u64, Swim::State::Alive))
+      list.update(Swim::Member.new("2", "10.0.0.2", 1_u64, Swim::State::Suspect))
+
+      list.cleanup_tombstones(0.seconds)
+      list.size.should eq(2)
+    end
+
+    it "does not remove dead members within the TTL window" do
+      list = Swim::MembershipList.new
+      list.update(Swim::Member.new("1", "10.0.0.1", 1_u64, Swim::State::Dead))
+
+      list.cleanup_tombstones(1.hour) # Cutoff is in the past, member is newer
+      list.size.should eq(1)
+    end
+  end
 end

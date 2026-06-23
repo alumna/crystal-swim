@@ -109,4 +109,57 @@ describe Swim::Node do
 
     node.stop
   end
+
+  it "communicates securely when an encryption key is provided" do
+    member_a = Swim::Member.new("A", "127.0.0.1:5008", 1_u64, Swim::State::Alive)
+    member_b = Swim::Member.new("B", "127.0.0.1:5009", 1_u64, Swim::State::Alive)
+
+    list_a = Swim::MembershipList.new
+    list_a.update(member_b)
+    protocol_a = Swim::Protocol.new(member_a, list_a)
+
+    list_b = Swim::MembershipList.new
+    list_b.update(member_a)
+    protocol_b = Swim::Protocol.new(member_b, list_b)
+
+    # Both nodes share the same cluster key
+    cluster_secret = "super-secret-cluster-key"
+    node_a = Swim::Node.new(protocol_a, "127.0.0.1", 5008, encryption_key: cluster_secret)
+    node_b = Swim::Node.new(protocol_b, "127.0.0.1", 5009, encryption_key: cluster_secret)
+
+    begin
+      node_a.start(tick_interval: 10.milliseconds)
+      node_b.start(tick_interval: 10.milliseconds)
+
+      sleep 50.milliseconds
+
+      # Verify they successfully decrypted each other's packets
+      node_a.protocol.members.get("B").try(&.state).should eq(Swim::State::Alive)
+      node_b.protocol.members.get("A").try(&.state).should eq(Swim::State::Alive)
+    ensure
+      node_a.stop
+      node_b.stop
+    end
+  end
+
+  it "ignores packets encrypted with the wrong key" do
+    member = Swim::Member.new("A", "127.0.0.1:5010", 1_u64, Swim::State::Alive)
+    protocol = Swim::Protocol.new(member, Swim::MembershipList.new)
+
+    node = Swim::Node.new(protocol, "127.0.0.1", 5010, encryption_key: "correct-key")
+    node.start(tick_interval: 1.second)
+
+    # Simulate an attacker or misconfigured node sending garbage/wrong key
+    garbage_socket = UDPSocket.new
+    target_addr = Socket::IPAddress.new("127.0.0.1", 5010)
+    garbage_socket.send("unencrypted plaintext json", target_addr)
+    garbage_socket.close
+
+    sleep 50.milliseconds
+
+    # The node should have rescued the Cipher error and ignored the packet
+    node.protocol.members.size.should eq(1)
+
+    node.stop
+  end
 end
