@@ -96,4 +96,25 @@ describe Swim::Protocol do
 
     members.get("B").try(&.state).should eq(Swim::State::Suspect)
   end
+
+  it "transitions from suspect to dead on subsequent failure" do
+    members = Swim::MembershipList.new
+
+    # Force node B to start as Suspect
+    suspect_b = node_b.copy_with(state: Swim::State::Suspect)
+    members.update(suspect_b)
+
+    protocol = Swim::Protocol.new(local, members)
+    tick_effects = protocol.on_tick
+    seq = tick_effects.find(&.is_a?(Swim::SendMessage)).as(Swim::SendMessage).message.seq
+
+    # Direct fails
+    protocol.on_timeout(seq, Swim::TimeoutType::DirectPing)
+
+    # Indirect fails
+    protocol.on_timeout(seq, Swim::TimeoutType::IndirectPingReq)
+
+    # Because it was already Suspect, it is now Dead!
+    members.get("B").try(&.state).should eq(Swim::State::Dead)
+  end
 end
