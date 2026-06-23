@@ -1,7 +1,6 @@
 # Swim (crystal-swim)
 
-[![Crystal CI](https://github.com/alumna/crystal-swim/actions/workflows/ci.yml/badge.svg)](https://github.com/alumna/crystal-swim/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/alumna/crystal-swim/branch/main/graph/badge.svg)](https://codecov.io/gh/alumna/crystal-swim)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/alumna/crystal-swim/ci.yml) [![codecov](https://codecov.io/gh/alumna/crystal-swim/branch/master/graph/badge.svg?token=FasTA63Qyj)](https://codecov.io/gh/alumna/crystal-swim) ![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Falumna%2Fcrystal-swim%2Frefs%2Fheads%2Fmaster%2Fshard.yml&query=version&prefix=v&label=version) ![GitHub License](https://img.shields.io/github/license/alumna/backend)
 
 A production-grade, thread-safe implementation of the [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf) (Scalable Weakly-consistent Infection-style Process Group Membership) protocol for Crystal.
 
@@ -13,6 +12,8 @@ This shard is designed to answer one question deterministically and efficiently:
 * **Lifeguard Extensions Included:** Natively implements Suspicion Refutation and Local Health Awareness (LHA) to dynamically scale timeouts and prevent false-positive cascading failures in degraded networks.
 * **Thread-Safe:** Safe to read from and write to concurrently, natively supporting Crystal 1.20+ Execution Contexts (`preview_mt`).
 * **Randomized Piggybacked Gossip:** Cluster state is disseminated exponentially fast with zero extra packets via MTU-bounded randomized piggybacking, guaranteeing multi-hop convergence.
+* **Tombstone Garbage Collection:** Automatically and safely prunes long-dead nodes from the registry to reclaim memory in long-running clusters.
+* **Payload Encryption (AES-256-GCM):** Optional cryptographic authentication and encryption for secure clustering over untrusted public networks.
 * **Zero Dependencies:** Pure Crystal implementation based entirely on Crystal's stdlib.
 
 ## Installation
@@ -40,16 +41,24 @@ local_member = Swim::Member.new(
   state: Swim::State::Alive
 )
 
-# 2. Initialize the Membership List and Protocol
 members = Swim::MembershipList.new
-protocol = Swim::Protocol.new(local_member, members)
+
+# 2. Initialize the Protocol 
+# (Optional: Configure base timeouts and Tombstone GC time-to-live)
+protocol = Swim::Protocol.new(
+  local_member, 
+  members,
+  base_timeout: 500.milliseconds,
+  tombstone_ttl: 24.hours
+)
 
 # (Optional) Seed the node with a known peer to join the cluster
 seed_node = Swim::Member.new("node-2", "10.0.0.2:5000", 0_u64, Swim::State::Alive)
 members.update(seed_node)
 
 # 3. Start the background network engine
-node = Swim::Node.new(protocol, host: "0.0.0.0", port: 5000)
+# (Optional: Pass a shared secret to enable AES-256-GCM encryption across the cluster)
+node = Swim::Node.new(protocol, host: "0.0.0.0", port: 5000, encryption_key: "my-cluster-secret")
 node.start(tick_interval: 1.second)
 
 # Read the current active cluster state safely from any thread
@@ -58,10 +67,6 @@ puts "Currently active nodes: #{node.protocol.members.size}"
 # Graceful shutdown
 node.stop
 ```
-
-## Roadmap
-* **Configurable Tombstone Garbage Collection:** Automatically drop long-dead nodes from the registry to reclaim memory in long-running clusters.
-* **Payload Encryption (AES-GCM):** Optional cryptographic validation for secure clustering over untrusted network segments.
 
 ## Contributing
 

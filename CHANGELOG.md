@@ -1,5 +1,21 @@
 # Swim changelog
 
+## 0.2.0 - 2026-06-23
+
+### Added
+* **security:** Optional **AES-256-GCM Payload Encryption**. Passing a shared `encryption_key` to `Swim::Node` hashes the key via SHA-256 and silently secures all UDP traffic. Unauthenticated or tampered packets are automatically dropped before reaching the protocol layer.
+* **memory:** **Tombstone Garbage Collection**. `Swim::Protocol` now periodically and non-blockingly prunes `Dead` nodes older than `tombstone_ttl` (defaults to 24 hours), permanently fixing memory leaks in long-running deployments.
+
+### Changed
+* **protocol:** A node will now aggressively refute `Dead` status gossip about itself, not just `Suspect` status, ensuring smooth cluster rejoins after network partitions heal.
+* **protocol:** `fetch_gossip` now guarantees the inclusion of the local node's state in its payload. This ensures suspicion refutations propagate with zero added latency.
+* **architecture:** `Swim::Effect` is now implemented as a compile-time exhaustive union alias (`SendMessage | ScheduleTimeout`), enhancing type safety.
+
+### Performance
+* **network:** Implemented a thread-safe Address Cache inside `Swim::Node` to prevent allocating and resolving IP strings on every single UDP send.
+* **core:** Replaced nested logic in `MembershipList` with native tuple comparisons to execute SWIM precedence rules (`Dead > Suspect > Alive`) branchlessly.
+* **core:** O(N) optimizations to `MembershipList#sample` using native Crystal `Set` allocations.
+
 ## 0.1.0 - 2026-06-23
 
 ### Added
