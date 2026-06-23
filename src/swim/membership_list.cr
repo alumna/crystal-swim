@@ -42,12 +42,13 @@ module Swim
       @lock.read { @members.size }
     end
 
-    # Selects random members for pinging/ping-reqs.
-    def sample(count : Int32, exclude_ids : Enumerable(String) = [] of String) : Array(Member)
+    # Selects random members.
+    # exclude_dead: true prevents us from wasting network bandwidth pinging tombstones.
+    def sample(count : Int32, exclude_ids : Enumerable(String) = [] of String, exclude_dead : Bool = false) : Array(Member)
       @lock.read do
-        # For a mature system, if the cluster exceeds 10k nodes, this linear filter
-        # could be optimized, but keeping it simple is the right baseline.
-        candidates = @members.values.reject { |m| exclude_ids.includes?(m.id) }
+        candidates = @members.values.reject do |m|
+          exclude_ids.includes?(m.id) || (exclude_dead && m.state == State::Dead)
+        end
         candidates.sample(count)
       end
     end

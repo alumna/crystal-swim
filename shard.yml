@@ -6,4 +6,8 @@ authors:
 
 crystal: ">= 1.20.0"
 
+targets:
+  swim:
+    main: src/swim.cr
+
 license: MIT
