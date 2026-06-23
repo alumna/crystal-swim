@@ -8,9 +8,10 @@ This shard is designed to answer one question deterministically and efficiently:
 
 ## Features
 
-* **Hexagonal Architecture (Sans-I/O):** The core protocol is a pure state machine decoupled from time and sockets, allowing for instantaneous, deterministic network partition testing.
+* **Hexagonal Architecture (Sans-I/O):** The core protocol is a pure state machine decoupled from sockets, allowing for instantaneous, deterministic network partition testing.
 * **Lifeguard Extensions Included:** Natively implements Suspicion Refutation and Local Health Awareness (LHA) to dynamically scale timeouts and prevent false-positive cascading failures in degraded networks.
-* **Thread-Safe:** Safe to read from and write to concurrently, natively supporting Crystal 1.20+ Execution Contexts (`preview_mt`).
+* **Thread-Safe & Crystal 1.20+ Native:** Safe to read from and write to concurrently, natively supporting Execution Contexts (`preview_mt`). Uses `Time.instant` for monotonic, NTP-skew-proof clock safety.
+* **Zero-Allocation Hot Paths:** Memory-optimized gossip engine and UDP networking to ensure flat memory usage in long-running, highly active clusters.
 * **Randomized Piggybacked Gossip:** Cluster state is disseminated exponentially fast with zero extra packets via MTU-bounded randomized piggybacking, guaranteeing multi-hop convergence.
 * **Tombstone Garbage Collection:** Automatically and safely prunes long-dead nodes from the registry to reclaim memory in long-running clusters.
 * **Payload Encryption (AES-256-GCM):** Optional cryptographic authentication and encryption for secure clustering over untrusted public networks.

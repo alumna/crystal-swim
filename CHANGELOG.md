@@ -1,5 +1,22 @@
 # Swim changelog
 
+## 0.2.1 - 2026-06-23
+
+### Performance
+* **memory:** **Zero-Allocation Cipher Hot Path.** Replaced `IO::Memory` with direct slice copying and `String.build` in AES-GCM encryption/decryption, reducing GC pressure on encrypted clusters.
+* **memory:** Refactored `MembershipList#sample` to eliminate continuous `Set` allocations per tick, utilizing faster Array lookups for exclusion checking.
+* **memory:** Compacted the `Swim::State` enum to `UInt8` to reduce the baseline memory footprint of the cluster registry.
+* **network:** Removed string allocation in `Swim::Node`'s address cache by utilizing stack-allocated `rpartition` tuples.
+
+### Reliability & Fixes
+* **core:** **Monotonic Clock Migration.** Replaced `Time.utc` with Crystal 1.20's `Time.instant`. Tombstone Garbage Collection is now better prepared to system clock skew and NTP synchronization jumps.
+* **network:** **Maximum UDP Buffer.** Increased the UDP receive buffer in `Swim::Node` to 65507 bytes (the absolute maximum UDP payload). This guarantees messages are never truncated, even in massive clusters with large piggyback MTUs.
+* **tests:** Resolved an intermittent port collision (`5010`) between sequential runs of `node_spec.cr` and `cluster_integration_spec.cr`.
+
+### Internal
+* **safety:** Introduced exhaustive pattern matching (`case ... in`) across `MessageType`, `TimeoutType`, and `Effect` unions. The compiler now statically guarantees that all future protocol additions are safely handled.
+* **protocol:** DRY'd up identical state update branches (`mark_alive`, `mark_suspect`, `mark_dead`) into a single, idempotent `mark_as` routine.
+
 ## 0.2.0 - 2026-06-23
 
 ### Added
