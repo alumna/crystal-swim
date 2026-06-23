@@ -97,7 +97,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          slug: alumna/backend
+          slug: alumna/crystal-swim
           report_type: test_results
           files: ./junit/output.xml
           flags: unittests
