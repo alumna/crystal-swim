@@ -3,7 +3,7 @@ require "json"
 module Swim
   # Represents the known state of a node in the cluster.
   # The integer values map perfectly to SWIM precedence (Dead > Suspect > Alive).
-  enum State
+  enum State : UInt8
     Alive   = 0
     Suspect = 1
     Dead    = 2
@@ -16,8 +16,9 @@ module Swim
 
     # Determines if this member's state should overwrite an existing member's state,
     # following standard SWIM conflict resolution rules.
+    @[AlwaysInline]
     def overrides?(other : Member) : Bool
-      {self.incarnation, self.state.value} > {other.incarnation, other.state.value}
+      {incarnation, state.value} > {other.incarnation, other.state.value}
     end
   end
 end

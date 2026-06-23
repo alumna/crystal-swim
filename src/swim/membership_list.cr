@@ -1,9 +1,10 @@
+# src/swim/membership_list.cr
 require "sync"
 require "./member"
 
 module Swim
   class MembershipList
-    alias Entry = {Member, Time}
+    alias Entry = {member: Member, updated_at: Time::Instant}
 
     def initialize
       @lock = Sync::RWLock.new
@@ -14,8 +15,8 @@ module Swim
       @lock.write do
         existing = @members[new_member.id]?
 
-        if !existing || new_member.overrides?(existing[0])
-          @members[new_member.id] = {new_member, Time.utc}
+        if !existing || new_member.overrides?(existing[:member])
+          @members[new_member.id] = {member: new_member, updated_at: Time.instant}
           true
         else
           false
@@ -24,11 +25,11 @@ module Swim
     end
 
     def get(id : String) : Member?
-      @lock.read { @members[id]?.try(&.[0]) }
+      @lock.read { @members[id]?.try(&.[:member]) }
     end
 
     def all : Array(Member)
-      @lock.read { @members.values.map(&.[0]) }
+      @lock.read { @members.values.map(&.[:member]) }
     end
 
     def size : Int32
@@ -36,12 +37,11 @@ module Swim
     end
 
     def sample(count : Int32, exclude_ids : Enumerable(String) = [] of String, exclude_dead : Bool = false) : Array(Member)
-      exclude_set = exclude_ids.to_set
-
       @lock.read do
         candidates = [] of Member
-        @members.each_value do |(m, _)|
-          next if exclude_set.includes?(m.id)
+        @members.each_value do |entry|
+          m = entry[:member]
+          next if exclude_ids.includes?(m.id)
           next if exclude_dead && m.state.dead?
           candidates << m
         end
@@ -54,9 +54,11 @@ module Swim
     end
 
     def cleanup_tombstones(ttl : Time::Span) : Nil
-      cutoff = Time.utc - ttl
+      cutoff = Time.instant - ttl
       @lock.write do
-        @members.reject! { |_, (m, updated_at)| m.state.dead? && updated_at < cutoff }
+        @members.reject! do |_, entry|
+          entry[:member].state.dead? && entry[:updated_at] < cutoff
+        end
       end
     end
   end

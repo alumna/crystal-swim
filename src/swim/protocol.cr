@@ -4,6 +4,10 @@ require "./effect"
 
 module Swim
   class Protocol
+    MAX_PIGGYBACK_SIZE          =  5
+    MAX_LOCAL_HEALTH_MULTIPLIER =  5
+    GC_TICK_INTERVAL            = 60
+
     getter local_member : Member
     getter members : MembershipList
 
@@ -16,11 +20,8 @@ module Swim
     record ProxyPing, origin_address : String, origin_seq : UInt64, target_id : String
     @proxy_pings = Hash(UInt64, ProxyPing).new
 
-    @max_piggyback_size : Int32 = 5
-
     # Lifeguard: Local Health Awareness
     getter local_health_multiplier : Int32 = 0
-    @max_local_health_multiplier : Int32 = 5
     @base_timeout : Time::Span
     @tombstone_ttl : Time::Span
 
@@ -37,13 +38,11 @@ module Swim
     def on_tick : Array(Effect)
       effects = [] of Effect
 
-      # Run Tombstone GC every 60 ticks (approximately 1 minute)
       @tick_counter &+= 1_u64
-      if (@tick_counter % 60) == 0
+      if (@tick_counter % GC_TICK_INTERVAL) == 0
         @members.cleanup_tombstones(@tombstone_ttl)
       end
 
-      # We do not ping ourselves, and we do not waste network traffic pinging DEAD nodes
       targets = @members.sample(1, exclude_ids: [@local_member.id], exclude_dead: true)
 
       return effects if targets.empty?
@@ -68,13 +67,14 @@ module Swim
         apply_update(gossiped_member)
       end
 
+      # Exhaustive matching: Compiler errors if a MessageType is added and not handled
       case msg.type
-      when MessageType::Ping
+      in .ping?
         ack = Message.new(MessageType::Ack, msg.seq, @local_member.id, @local_member.address, changes: fetch_gossip)
         effects << SendMessage.new(msg.sender_address, ack)
-      when MessageType::Ack
+      in .ack?
         if pending = @pending_pings.delete(msg.seq)
-          mark_alive(pending.target_id)
+          mark_as(pending.target_id, State::Alive)
           improve_local_health
         end
 
@@ -89,7 +89,7 @@ module Swim
           )
           effects << SendMessage.new(proxy.origin_address, forwarded_ack)
         end
-      when MessageType::PingReq
+      in .ping_req?
         if (target_id = msg.target_id) && (target_addr = msg.target_address)
           seq = next_seq
           @proxy_pings[seq] = ProxyPing.new(msg.sender_address, msg.seq, target_id)
@@ -107,13 +107,13 @@ module Swim
     def on_timeout(seq : UInt64, type : TimeoutType) : Array(Effect)
       effects = [] of Effect
 
+      # Exhaustive matching for TimeoutType
       case type
-      when TimeoutType::DirectPing
+      in .direct_ping?
         if pending = @pending_pings[seq]?
           target = @members.get(pending.target_id)
 
           if target
-            # Do not ask dead nodes to help us proxy pings
             helpers = @members.sample(@ping_req_group_size, exclude_ids: [@local_member.id, target.id], exclude_dead: true)
 
             helpers.each do |helper|
@@ -132,15 +132,14 @@ module Swim
             effects << ScheduleTimeout.new(dynamic_timeout, TimeoutType::IndirectPingReq, seq)
           end
         end
-      when TimeoutType::IndirectPingReq
+      in .indirect_ping_req?
         if pending = @pending_pings.delete(seq)
           target = @members.get(pending.target_id)
 
-          # The transition: If they were already Suspect and failed again, they are Dead.
           if target && target.state == State::Suspect
-            mark_dead(pending.target_id)
+            mark_as(pending.target_id, State::Dead)
           else
-            mark_suspect(pending.target_id)
+            mark_as(pending.target_id, State::Suspect)
           end
 
           degrade_local_health
@@ -157,23 +156,11 @@ module Swim
       @seq_counter
     end
 
-    private def mark_alive(id : String) : Nil
+    private def mark_as(id : String, state : State) : Nil
       if member = @members.get(id)
-        apply_update(member.copy_with(state: State::Alive))
-      end
-    end
-
-    private def mark_suspect(id : String) : Nil
-      if member = @members.get(id)
-        updated_member = member.copy_with(state: State::Suspect)
-        apply_update(updated_member)
-      end
-    end
-
-    private def mark_dead(id : String) : Nil
-      if member = @members.get(id)
-        updated_member = member.copy_with(state: State::Dead)
-        apply_update(updated_member)
+        # Skip unnecessary allocations and list updates if the state is already correct
+        return if member.state == state
+        apply_update(member.copy_with(state: state))
       end
     end
 
@@ -190,10 +177,8 @@ module Swim
       @members.update(member)
     end
 
-    # Randomized Gossip: Simply grab random members from our list.
-    # Note: exclude_dead is false, so we DO gossip tombstones to ensure the cluster learns of deaths.
     private def fetch_gossip : Array(Member)
-      gossip = @members.sample(@max_piggyback_size - 1, exclude_ids: [@local_member.id])
+      gossip = @members.sample(MAX_PIGGYBACK_SIZE - 1, exclude_ids: [@local_member.id])
       gossip << @local_member
       gossip
     end
@@ -203,11 +188,11 @@ module Swim
     end
 
     private def improve_local_health : Nil
-      @local_health_multiplier = (@local_health_multiplier - 1).clamp(0, @max_local_health_multiplier)
+      @local_health_multiplier = (@local_health_multiplier - 1).clamp(0, MAX_LOCAL_HEALTH_MULTIPLIER)
     end
 
     private def degrade_local_health : Nil
-      @local_health_multiplier = (@local_health_multiplier + 1).clamp(0, @max_local_health_multiplier)
+      @local_health_multiplier = (@local_health_multiplier + 1).clamp(0, MAX_LOCAL_HEALTH_MULTIPLIER)
     end
   end
 end
