@@ -8,6 +8,7 @@ module Swim
     getter members : MembershipList
 
     @seq_counter : UInt64 = 0_u64
+    @tick_counter : UInt64 = 0_u64
 
     record PendingPing, target_id : String
     @pending_pings = Hash(UInt64, PendingPing).new
@@ -21,18 +22,26 @@ module Swim
     getter local_health_multiplier : Int32 = 0
     @max_local_health_multiplier : Int32 = 5
     @base_timeout : Time::Span
+    @tombstone_ttl : Time::Span
 
     def initialize(
       @local_member : Member,
       @members : MembershipList,
       @ping_req_group_size : Int32 = 3,
       @base_timeout : Time::Span = 500.milliseconds,
+      @tombstone_ttl : Time::Span = 24.hours,
     )
       @members.update(@local_member)
     end
 
     def on_tick : Array(Effect)
       effects = [] of Effect
+
+      # Run Tombstone GC every 60 ticks (approximately 1 minute)
+      @tick_counter &+= 1_u64
+      if (@tick_counter % 60) == 0
+        @members.cleanup_tombstones(@tombstone_ttl)
+      end
 
       # We do not ping ourselves, and we do not waste network traffic pinging DEAD nodes
       targets = @members.sample(1, exclude_ids: [@local_member.id], exclude_dead: true)

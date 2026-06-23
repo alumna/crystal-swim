@@ -117,4 +117,19 @@ describe Swim::Protocol do
     # Because it was already Suspect, it is now Dead!
     members.get("B").try(&.state).should eq(Swim::State::Dead)
   end
+
+  it "triggers tombstone garbage collection periodically" do
+    members = Swim::MembershipList.new
+    # Setting a 0 TTL so any Dead node gets collected immediately on GC
+    protocol = Swim::Protocol.new(local, members, tombstone_ttl: 0.seconds)
+
+    members.update(Swim::Member.new("DEAD_NODE", "10.0.0.99", 1_u64, Swim::State::Dead))
+    members.size.should eq(2) # local + dead
+
+    # Force ticks up to the periodic GC threshold
+    60.times { protocol.on_tick }
+
+    members.size.should eq(1)
+    members.get("DEAD_NODE").should be_nil
+  end
 end
