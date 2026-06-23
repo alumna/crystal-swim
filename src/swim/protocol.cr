@@ -19,6 +19,11 @@ module Swim
     @gossip_queue = [] of Member
     @max_piggyback_size : Int32 = 5
 
+    # Lifeguard: Local Health Awareness
+    getter local_health_multiplier : Int32 = 0
+    @max_local_health_multiplier : Int32 = 5
+    @base_timeout : Time::Span = 500.milliseconds
+
     def initialize(@local_member : Member, @members : MembershipList, @ping_req_group_size : Int32 = 3)
       @members.update(@local_member)
     end
@@ -38,7 +43,7 @@ module Swim
       msg = Message.new(MessageType::Ping, seq, @local_member.id, @local_member.address, changes: fetch_gossip)
       effects << SendMessage.new(target.address, msg)
 
-      effects << ScheduleTimeout.new(500.milliseconds, TimeoutType::DirectPing, seq)
+      effects << ScheduleTimeout.new(dynamic_timeout, TimeoutType::DirectPing, seq)
 
       effects
     end
@@ -59,6 +64,7 @@ module Swim
       when MessageType::Ack
         if pending = @pending_pings.delete(msg.seq)
           mark_alive(pending.target_id)
+          improve_local_health # Lifeguard: A successful probe means our network is healthy
         end
 
         if proxy = @proxy_pings.delete(msg.seq)
@@ -82,7 +88,7 @@ module Swim
           proxy_ping = Message.new(MessageType::Ping, seq, @local_member.id, @local_member.address, changes: fetch_gossip)
           effects << SendMessage.new(target_addr, proxy_ping)
 
-          effects << ScheduleTimeout.new(500.milliseconds, TimeoutType::IndirectPingReq, seq)
+          effects << ScheduleTimeout.new(dynamic_timeout, TimeoutType::IndirectPingReq, seq)
         end
       end
 
@@ -113,12 +119,13 @@ module Swim
               effects << SendMessage.new(helper.address, req)
             end
 
-            effects << ScheduleTimeout.new(500.milliseconds, TimeoutType::IndirectPingReq, seq)
+            effects << ScheduleTimeout.new(dynamic_timeout, TimeoutType::IndirectPingReq, seq)
           end
         end
       when TimeoutType::IndirectPingReq
         if pending = @pending_pings.delete(seq)
           mark_suspect(pending.target_id)
+          degrade_local_health # Lifeguard: A completely failed probe degrades our confidence in our own network
         end
 
         @proxy_pings.delete(seq)
@@ -177,6 +184,20 @@ module Swim
       # Pull up to max_piggyback_size items from the front of the queue
       size_to_take = Math.min(@gossip_queue.size, @max_piggyback_size)
       @gossip_queue.shift(size_to_take)
+    end
+
+    # Needed for lifeguard: Local Health Awareness:
+
+    private def dynamic_timeout : Time::Span
+      @base_timeout * (1 + @local_health_multiplier)
+    end
+
+    private def improve_local_health : Nil
+      @local_health_multiplier -= 1 unless @local_health_multiplier == 0
+    end
+
+    private def degrade_local_health : Nil
+      @local_health_multiplier += 1 unless @local_health_multiplier >= @max_local_health_multiplier
     end
   end
 end
