@@ -170,7 +170,7 @@ module Swim
 
     private def apply_update(member : Member) : Nil
       if member.id == @local_member.id
-        if member.state == State::Suspect
+        if member.state.suspect? || member.state.dead?
           new_incarnation = @local_member.incarnation + 1_u64
           @local_member = @local_member.copy_with(incarnation: new_incarnation, state: State::Alive)
           @members.update(@local_member)
@@ -184,7 +184,9 @@ module Swim
     # Randomized Gossip: Simply grab random members from our list.
     # Note: exclude_dead is false, so we DO gossip tombstones to ensure the cluster learns of deaths.
     private def fetch_gossip : Array(Member)
-      @members.sample(@max_piggyback_size)
+      gossip = @members.sample(@max_piggyback_size - 1, exclude_ids: [@local_member.id])
+      gossip << @local_member
+      gossip
     end
 
     private def dynamic_timeout : Time::Span
@@ -192,11 +194,11 @@ module Swim
     end
 
     private def improve_local_health : Nil
-      @local_health_multiplier -= 1 unless @local_health_multiplier == 0
+      @local_health_multiplier = (@local_health_multiplier - 1).clamp(0, @max_local_health_multiplier)
     end
 
     private def degrade_local_health : Nil
-      @local_health_multiplier += 1 unless @local_health_multiplier >= @max_local_health_multiplier
+      @local_health_multiplier = (@local_health_multiplier + 1).clamp(0, @max_local_health_multiplier)
     end
   end
 end
