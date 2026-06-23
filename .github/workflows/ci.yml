@@ -86,3 +86,20 @@ jobs:
           files: ./coverage/**/cobertura.xml,./coverage/**/cov.xml
           flags: unittests
           fail_ci_if_error: false
+
+      - name: Run specs and generate JUnit XML for Test Analytics
+        run: |
+          mkdir -p junit
+          crystal spec --junit_output ./junit --error-trace
+
+      - name: Upload test results to Codecov (Test Analytics)
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: alumna/backend
+          report_type: test_results
+          files: ./junit/output.xml
+          flags: unittests
+          fail_ci_if_error: false
+          verbose: true
