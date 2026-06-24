@@ -10,24 +10,19 @@ It answers one question efficiently: **"Who is currently in the cluster, and who
 
 ## What is SWIM?
 
-SWIM is a highly efficient, decentralized protocol used in distributed computing to track which nodes are active in a cluster and quickly detect any node failures.
+SWIM is a decentralized **cluster membership and failure detection protocol**. It solves a similar problem to consensus algorithms (like Raft or Paxos) by keeping a distributed system synchronized. However, while consensus requires *strict agreement* over data, SWIM provides *eventually consistent awareness* of who is alive and who is dead.
 
-It can be categorized as a:
+**How it works, in three steps:**
 
-- **cluster membership protocol** or
-- **Gossip-based Failure Detection**
+1. **Direct ping:** Every second, a node randomly pings one peer.
+2. **Indirect check:** If there is no acknowledgment, it asks 2 to 3 other peers to ping the target on its behalf.
+3. **Gossip:** State updates (alive, suspect, dead) are piggybacked onto regular UDP packets, spreading rapidly across the cluster like an infection.
 
-SWIM is not a consensus algorithm like Paxos or Raft. It does not agree on values or replicate logs. It maintains a live member list.
+**The Advantage: Flat Network Load**
+In traditional heartbeating, network traffic grows quadratically as the cluster grows. With SWIM, each node only talks to a constant, small number of peers. This means **network load stays flat regardless of cluster size**. Maintaining a 1,000-node cluster costs each node the same few UDP packets per second as a 10-node cluster.
 
-How it works, in three steps:
-
-1. **Direct ping:** every second, your node randomly picks one peer and pings it
-2. **Indirect check:** if no ack, it asks 2 to 3 other random peers to ping that target for it
-3. **Gossip:** the result (alive, suspect, dead) is piggybacked on the next few UDP packets, spreading like infection
-
-Because each node only talks to a constant, small number of peers, **network load stays flat regardless of cluster size**. A 10-node cluster and a 1,000-node cluster cost each node about the same few UDP packets per second. Traditional heartbeating grows quadratically with N, SWIM does not.
-
-The trade-off is consistency: views are eventually consistent, not instantly identical everywhere. For membership, that is usually what you want.
+**The Trade-off: Eventual Consistency**
+Because SWIM relies on gossip, node lists are eventually consistent rather than instantly identical everywhere. However, for tracking cluster membership at scale, this is usually exactly the trade-off you want.
 
 ## Why not just use Raft?
 
