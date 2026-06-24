@@ -10,7 +10,9 @@ It answers one question efficiently: **"Who is currently in the cluster, and who
 
 ## What is SWIM?
 
-SWIM is a decentralized **cluster membership and failure detection protocol**. It solves a similar problem to consensus algorithms (like Raft or Paxos) by keeping a distributed system synchronized. However, while consensus requires *strict agreement* over data, SWIM provides *eventually consistent awareness* of who is alive and who is dead.
+SWIM is a decentralized **cluster membership and failure detection protocol**.
+
+It solves a similar problem to consensus algorithms (like Raft or Paxos) by keeping a distributed system synchronized. However, while consensus requires *strict agreement* over data, SWIM provides *eventually consistent awareness* of who is alive and who is dead.
 
 **How it works, in three steps:**
 
@@ -19,9 +21,11 @@ SWIM is a decentralized **cluster membership and failure detection protocol**. I
 3. **Gossip:** State updates (alive, suspect, dead) are piggybacked onto regular UDP packets, spreading rapidly across the cluster like an infection.
 
 **The Advantage: Flat Network Load**
+
 In traditional heartbeating, network traffic grows quadratically as the cluster grows. With SWIM, each node only talks to a constant, small number of peers. This means **network load stays flat regardless of cluster size**. Maintaining a 1,000-node cluster costs each node the same few UDP packets per second as a 10-node cluster.
 
 **The Trade-off: Eventual Consistency**
+
 Because SWIM relies on gossip, node lists are eventually consistent rather than instantly identical everywhere. However, for tracking cluster membership at scale, this is usually exactly the trade-off you want.
 
 ## Why not just use Raft?
