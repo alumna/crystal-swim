@@ -10,6 +10,8 @@ It answers one question efficiently: **"Who is currently in the cluster, and who
 
 ## What is SWIM?
 
+SWIM is a highly efficient, decentralized protocol used in distributed computing to track which nodes are active in a cluster and quickly detect any node failures.
+
 SWIM is not a consensus algorithm like Paxos or Raft. It does not agree on values or replicate logs. It maintains a live member list.
 
 How it works, in three steps:
