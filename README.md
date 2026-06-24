@@ -55,7 +55,7 @@ In practice this reduces false-positive cascades by more than 50x in degraded ne
 
 ## When to use crystal-swim
 
-- **Large, dynamic Crystal clusters:** 20 to 2,000 workers, game servers, job processors, or edge nodes that join and leave often
+- **Large, dynamic Crystal clusters:** 10 to million-node clusters, game servers, job processors, or edge nodes that join and leave often
 - **Ephemeral infrastructure:** Kubernetes pods, preemptible VMs, autoscaling groups where nodes get slow before they die
 - **Decentralized discovery:** you want a member list without running etcd, Consul, or ZooKeeper
 - **WAN or multi-AZ meshes:** where RTT varies and you need indirect probes to avoid false partitions
@@ -153,6 +153,14 @@ crystal run examples/cluster.cr -- -p 5001 -s 127.0.0.1:5000
 crystal run examples/cluster.cr -- -p 5002 -s 127.0.0.1:5001
 ```
 *Tip: Try killing Terminal 2 (`Ctrl+C`) and watch Terminals 1 and 3 dynamically downgrade Node 5001 to `SUSPECT` and then `DEAD`!*
+
+## Tuning for Geographic Distribution
+
+`crystal-swim` is tuned out of the box for typical single-region cloud environments. However, if you are running a high-speed local game server, or a multi-continent global edge mesh, you will need to adjust the protocol's timing to match your network's physics.
+
+We have prepared a comprehensive guide explaining the underlying math, how to adjust timeouts without causing false-positive cascades, and tables with estimated convergence times for clusters up to 1,000,000 nodes.
+
+**Read the [Cluster Tuning & Geographic Distribution Guide](CLUSTER_TUNING.md)**
 
 ## How it works under the hood
 
