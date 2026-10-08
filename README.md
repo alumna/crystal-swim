@@ -22,7 +22,7 @@ dependencies:
     github: alumna/crystal-swim
 ```
 
-Run `shards install`. The shard needs Crystal 1.21 or newer. The source on this branch includes the unreleased API in the changelog. Tag `0.2.1` is the previous API.
+Run `shards install`. The shard needs Crystal 1.21 or newer.
 
 ## Use
 

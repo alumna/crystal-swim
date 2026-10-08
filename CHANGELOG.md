@@ -1,6 +1,6 @@
 # Swim changelog
 
-## Unreleased
+## 0.3.0 - 2026-10-08
 
 ### Changed
 * **api:** `Swim.join` is the public entry point. A node address is `host:port`. The old `Member`, `Protocol`, and `Node` types are removed.

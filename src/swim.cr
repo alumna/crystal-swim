@@ -1,7 +1,7 @@
 require "./swim/cluster"
 
 module Swim
-  VERSION = "0.2.1"
+  VERSION = "0.3.0"
 
   # Joins a cluster. `advertise` is the address other nodes use, in `host:port` form.
   # `seeds` are known peers. Call `Cluster#stop` when this process leaves.
