@@ -2,7 +2,7 @@ require "../spec_helper"
 
 describe Swim::Cluster do
   it "reports the local peer and stops twice" do
-    Swim::VERSION.should eq("0.2.1")
+    Swim::VERSION.should eq("0.3.0")
     cluster = Swim.join("127.0.0.1:0", period: 20.milliseconds, timeout: 10.milliseconds)
     begin
       cluster.port.should be > 0
