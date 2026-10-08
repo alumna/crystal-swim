@@ -1,5 +1,16 @@
 # Swim changelog
 
+## Unreleased
+
+### Changed
+* **api:** `Swim.join` is the public entry point. A node address is `host:port`. The old `Member`, `Protocol`, and `Node` types are removed.
+* **protocol:** Datagrams use a fixed binary layout. The hot path does not build JSON.
+* **runtime:** The reactor runs in one `Fiber::ExecutionContext::Concurrent`. One ticker waits for the next probe. The node does not spawn a fiber for each timeout.
+* **crystal:** The shard requires Crystal 1.21 or newer. `spawn(same_thread:)` is not used.
+
+### Performance
+* **memory:** Probe state, gossip, and AES-256-GCM reuse buffers. A stable probe round trip does not allocate. A sample of a stable membership table does not allocate.
+
 ## 0.2.1 - 2026-06-23
 
 ### Performance

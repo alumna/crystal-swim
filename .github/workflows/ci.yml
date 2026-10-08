@@ -39,11 +39,8 @@ jobs:
       - run: shards install
       - run: crystal tool format --check
 
-      - name: Run specs (Single-Threaded)
+      - name: Run specs
         run: crystal spec --error-trace --verbose
-
-      - name: Run specs (Multi-Threaded)
-        run: crystal spec -Dpreview_mt -Dexecution_context --error-trace --verbose
 
   coverage:
     runs-on: ubuntu-22.04

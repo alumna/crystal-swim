@@ -1,85 +1,20 @@
-# Swim (crystal-swim)
+# Swim
 
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/alumna/crystal-swim/ci.yml) [![codecov](https://codecov.io/gh/alumna/crystal-swim/branch/master/graph/badge.svg?token=FasTA63Qyj)](https://codecov.io/gh/alumna/crystal-swim) ![Dynamic YAML Badge](https://img.shields.io/badge/dynamic/yaml?url=https%3A%2F%2Fraw.githubusercontent.com%2Falumna%2Fcrystal-swim%2Frefs%2Fheads%2Fmaster%2Fshard.yml&query=version&prefix=v&label=version) ![GitHub License](https://img.shields.io/github/license/alumna/backend)
 
-A production-grade, thread-safe implementation of [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf) (Scalable Weakly-consistent Infection-style Process Group Membership) for Crystal, with Lifeguard extensions built in.
+Swim keeps a cluster membership list. Each node learns which peers are alive, suspect, or dead.
 
-It answers one question efficiently: **"Who is currently in the cluster, and who is dead?"**
+The protocol is [SWIM](https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf). Lifeguard local health and suspicion refutation are included.
 
----
+Use Swim for failure detection and peer discovery. Use Raft or Paxos when you need one agreed order for data.
 
-## What is SWIM?
+### The advantage
 
-SWIM is a decentralized **cluster membership and failure detection protocol**.
+In traditional heartbeating, network traffic grows quadratically as the cluster grows. With SWIM, each node only talks to a constant, small number of peers. The network load stays flat regardless of cluster size. Maintaining a 10,000-node cluster costs each node the same few UDP packets per second as a 10-node cluster.
 
-It solves a similar problem to consensus algorithms (like Raft or Paxos) by keeping a distributed system synchronized. However, while consensus requires *strict agreement* over data, SWIM provides *eventually consistent awareness* of who is alive and who is dead.
+## Install
 
-**How it works, in three steps:**
-
-1. **Direct ping:** Every second, a node randomly pings one peer.
-2. **Indirect check:** If there is no acknowledgment, it asks 2 to 3 other peers to ping the target on its behalf.
-3. **Gossip:** State updates (alive, suspect, dead) are piggybacked onto regular UDP packets, spreading rapidly across the cluster like an infection.
-
-**The Advantage: Flat Network Load**
-
-In traditional heartbeating, network traffic grows quadratically as the cluster grows. With SWIM, each node only talks to a constant, small number of peers. This means **network load stays flat regardless of cluster size**. Maintaining a 1,000-node cluster costs each node the same few UDP packets per second as a 10-node cluster.
-
-**The Trade-off: Eventual Consistency**
-
-Because SWIM relies on gossip, node lists are eventually consistent rather than instantly identical everywhere. However, for tracking cluster membership at scale, this is usually exactly the trade-off you want.
-
-## Why not just use Raft?
-
-Use Raft or Paxos when you need strong agreement on data. Use SWIM when you need cheap, fast awareness of liveness.
-
-| You need | Reach for |
-| --- | --- |
-| Replicated state machine, linearizable writes | Raft / Paxos |
-| Service discovery, consistent-hash ring, failure detection at scale | SWIM |
-
-Most real systems use both: SWIM keeps the peer list, a small Raft group (3 to 5 nodes) decides the data.
-
-## How Lifeguard makes this production-ready
-
-Pure SWIM assumes "if I don't get an ack, you are dead." Under CPU pressure, GC pauses, or spot-instance throttling, that causes false positives.
-
-This shard natively implements the [Lifeguard extensions developed by HashiCorp](https://arxiv.org/abs/1707.00788) to solve this. It introduces two core ideas by default:
-
-**1. Local Health Awareness (LHA)**
-Your node tracks its own health score. Successful probes improve it, missed acks degrade it. When unhealthy, it automatically stretches its timeouts (`dynamic_timeout = base_timeout * (1 + health_multiplier)`). Instead of declaring the cluster dead, it backs off.
-
-**2. Suspicion Refutation**
-Nodes are never marked dead instantly. First they become "suspect" and that suspicion is gossiped. The suspect node can refute by bumping its incarnation number and announcing "I'm alive." Only after confirmation timeout does the cluster mark it dead.
-
-In practice this reduces false-positive cascades by more than 50x in degraded networks, while keeping detection times low for real failures.
-
-## When to use crystal-swim
-
-- **Large, dynamic Crystal clusters:** 10 to million-node clusters, game servers, job processors, or edge nodes that join and leave often
-- **Ephemeral infrastructure:** Kubernetes pods, preemptible VMs, autoscaling groups where nodes get slow before they die
-- **Decentralized discovery:** you want a member list without running etcd, Consul, or ZooKeeper
-- **WAN or multi-AZ meshes:** where RTT varies and you need indirect probes to avoid false partitions
-
-## When not to use it
-
-- You need strong consistency or leader election for data. Use Raft.
-- Your cluster is tiny (3 to 5 nodes) and completely stable. A simple TCP heartbeat is less code.
-- You need millisecond-perfect global membership. SWIM converges in seconds, by design.
-
-## Features
-
-* **Lifeguard included:** Suspicion Refutation and Local Health Awareness are on by default, no config needed
-* **Hexagonal Architecture (Sans-I/O):** core protocol is a pure state machine. You can simulate partitions deterministically in specs without opening sockets
-* **Thread-Safe & Crystal 1.20+ Native:** safe for `preview_mt`, uses `Time.instant` for monotonic, NTP-skew-proof timers
-* **Zero-Allocation Hot Paths:** gossip engine and AES-GCM cipher avoid GC pressure in long-running clusters
-* **Randomized Piggybacked Gossip:** state disseminates exponentially with zero extra packets, MTU-bounded
-* **Tombstone Garbage Collection:** dead nodes are pruned automatically after `tombstone_ttl`
-* **Optional Payload Encryption:** AES-256-GCM for clustering over the public internet
-* **Zero Dependencies:** pure Crystal stdlib
-
-## Installation
-
-1. Add to your `shard.yml`:
+Add the shard to `shard.yml`.
 
 ```yaml
 dependencies:
@@ -87,99 +22,96 @@ dependencies:
     github: alumna/crystal-swim
 ```
 
-2. Run `shards install`
+Run `shards install`. The shard needs Crystal 1.21 or newer. The source on this branch includes the unreleased API in the changelog. Tag `0.2.1` is the previous API.
 
-## Usage
+## Use
 
 ```crystal
 require "swim"
 
-# 1. Define the local member 
-# (Using milliseconds guarantees a higher incarnation even on rapid sub-second reboots)
-local_member = Swim::Member.new(
-  id: "node-1",
-  address: "10.0.0.1:5000",
-  incarnation: Time.utc.to_unix_ms.to_u64,
-  state: Swim::State::Alive
-)
+cluster = Swim.join("10.0.0.1:7946", seeds: ["10.0.0.2:7946"])
 
-members = Swim::MembershipList.new
+cluster.each do |peer|
+  puts peer
+end
 
-# 2. Initialize the protocol
-protocol = Swim::Protocol.new(
-  local_member,
-  members,
-  base_timeout: 500.milliseconds,
-  tombstone_ttl: 24.hours
-)
+cluster.stop
+```
 
-# Optional: seed with a known peer
-seed = Swim::Member.new("node-2", "10.0.0.2:5000", 0_u64, Swim::State::Alive)
-members.update(seed)
+`Swim.join` binds a UDP socket and returns a `Swim::Cluster`. Call `stop` when the process leaves the cluster.
 
-# 3. Start the network engine (Ensure UDP port 5000 is open in your firewall!)
-# Pass an optional `encryption_key` to enable AES-256-GCM cluster-wide.
-# (Omit this if your network is already secure, e.g. VPC/WireGuard, to save CPU).
-node = Swim::Node.new(protocol, host: "0.0.0.0", port: 5000, encryption_key: "my-cluster-secret")
-node.start(tick_interval: 1.second)
+The block form stops the cluster when the block ends.
 
-# 4. Keep the main fiber alive to let the background network engine run
-begin
-  loop do
-    # Read cluster state safely from any fiber
-    puts "Active nodes: #{node.protocol.members.all.count(&.state.alive?)}"
-    sleep 2.seconds
-  end
-ensure
-  # Graceful leave when you press Ctrl+C
-  node.stop
+```crystal
+Swim.join("10.0.0.1:7946", seeds: ["10.0.0.2:7946"]) do |cluster|
+  cluster.each { |peer| puts peer }
 end
 ```
 
-The `Swim::Node` runs the UDP loop in the background. The `Swim::Protocol` is the pure logic you can unit-test by feeding it `Message` objects and inspecting the returned `Effect`s.
+A peer address is `host:port` or `[ipv6]:port`.
 
-### Try it locally!
+## Options
 
-Want to see the cluster discovery and failure detection in action right now? Clone this repository and run the included example in three separate terminals:
+| Name | Default | Role |
+| --- | --- | --- |
+| `bind` | the advertise address | Local UDP address. Use `0.0.0.0:7946` to listen on all IPv4 interfaces. |
+| `seeds` | none | Known peers. The node learns the rest by gossip. |
+| `key` | none | Shared secret. The node seals each datagram with AES-256-GCM. |
+| `period` | 1 second | Time between probes. |
+| `timeout` | 500 milliseconds | Time to wait for one ack. |
+| `tombstone` | 24 hours | Time to keep a dead peer before removal. |
+
+Set `timeout` to less than half of `period`.
+
+`period` and `timeout` for a local network, a region, and a wide area network are in [CLUSTER_TUNING.md](CLUSTER_TUNING.md).
+
+## Detection
+
+1. The node probes one live peer.
+2. When the ack does not arrive, the node asks up to three other peers to probe that target.
+3. When those probes also fail, the peer becomes suspect.
+4. The next failed probe marks a suspect peer dead.
+5. A peer that sees itself as suspect or dead increases its incarnation and sends alive.
+
+Each datagram carries up to five peer updates. Dead peers stay in the list until the tombstone time ends. An old datagram cannot bring a removed peer back with an old incarnation.
+
+The reactor runs in one concurrent execution context. Reads from your fibers take a lock.
+
+## Hardware use
+
+A node spends nearly all of its time asleep, waiting for the network. The CPU work for one probe is a fraction of a microsecond.
+
+These times are from a release build. They are CPU time inside the process. Travel time on the wire comes from `period` and `timeout`.
+
+| Work | CPU time | Memory allocated |
+| --- | ---: | ---: |
+| One probe and its ack | 0.55 µs | 0 |
+| Encrypt and decrypt one datagram | 1.2 µs | 0 |
+| Choose 5 peers from a list of 1,000 | 0.075 µs | 0 |
+
+With the default `period` of 1 second, a node does this work once per second. That is a tiny share of one CPU core. Set `key` when you want AES-256-GCM. The extra cost is about 1.2 µs per datagram, and that path also allocates nothing.
+
+| Peers in memory | Heap after a collection | Peak process memory |
+| --- | ---: | ---: |
+| 2 | 0.5 MB | 6.9 MB |
+| 1,000 | 1.2 MB | 7.4 MB |
+
+Most of that process memory is the Crystal runtime. The member list itself grows slowly: 1,000 peers use about 0.7 MB more heap than 2 peers. Probes allocate nothing, so a long run stays at this size and the GC stays quiet.
+
+## In-memory engine
+
+`Swim::Core` is the same protocol without sockets. Pass `now` into `tick`, `expire`, and `receive`. Specs use this to control time.
+
+## Development
 
 ```bash
-# Terminal 1: Start the seed node
-crystal run examples/cluster.cr -- -p 5000
-
-# Terminal 2: Join the cluster
-crystal run examples/cluster.cr -- -p 5001 -s 127.0.0.1:5000
-
-# Terminal 3: Join the cluster
-crystal run examples/cluster.cr -- -p 5002 -s 127.0.0.1:5001
+crystal spec
+crystal build all_specs.cr -o bin/all_specs --debug
+kcov --clean --include-path=$(pwd)/src ./coverage ./bin/all_specs
 ```
-*Tip: Try killing Terminal 2 (`Ctrl+C`) and watch Terminals 1 and 3 dynamically downgrade Node 5001 to `SUSPECT` and then `DEAD`!*
 
-## Tuning for Geographic Distribution
-
-`crystal-swim` is tuned out of the box for typical single-region cloud environments. However, if you are running a high-speed local game server, or a multi-continent global edge mesh, you will need to adjust the protocol's timing to match your network's physics.
-
-We have prepared a comprehensive guide explaining the underlying math, how to adjust timeouts without causing false-positive cascades, and tables with estimated convergence times for clusters up to 1,000,000 nodes.
-
-**Read the [Cluster Tuning & Geographic Distribution Guide](CLUSTER_TUNING.md)**
-
-## How it works under the hood
-
-- **Failure detector:** direct ping → indirect ping-req (k=3 by default) → suspect → dead
-- **Dissemination:** up to 6 member updates piggybacked on every ping, ack, and ping-req
-- **LHA:** health multiplier clamped 0..5, increases on timeout, decreases on success
-- **Safety:** incarnation numbers prevent old gossip from resurrecting dead nodes
-
-See `spec/swim/lifeguard_spec.cr` and `cluster_integration_spec.cr` for deterministic partition tests.
-
-## Contributing
-
-1. Fork it (<https://github.com/alumna/crystal-swim/fork>)
-2. Create your feature branch (`git checkout -b my-new-feature`)
-3. Ensure specs pass with 100% coverage (`crystal spec`)
-4. Commit your changes (`git commit -am 'Add some feature'`)
-5. Push to the branch (`git push origin my-new-feature`)
-6. Create a new Pull Request
+`src/` line coverage must stay at 100%.
 
 ## License
 
-MIT - see LICENSE
+MIT
